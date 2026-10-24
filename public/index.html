@@ -403,17 +403,19 @@ function decodeBuf(buf){
   if(u[0]===0xFF&&u[1]===0xFE)enc="utf-16le";else if(u[0]===0xFE&&u[1]===0xFF)enc="utf-16be";else if(u.length>3&&u[1]===0&&u[3]===0)enc="utf-16le";
   return new TextDecoder(enc).decode(u);
 }
-// MT5 "Report > HTML" file: pick the Positions table rows (13 columns, dates in columns 1 and 9)
+// MT5 "Report > HTML" file: find Positions rows even if the report has empty spacer cells
 function reportRows(html){
-  var rows=[],bad=0,D=/^\d{4}[.\-]\d{2}[.\-]\d{2}[ T]\d{2}:\d{2}/;
+  var rows=[],bad=0,deals=0,D=/^\d{4}[.\-]\d{2}[.\-]\d{2}[ T]\d{2}:\d{2}/;
   html.split(/<tr[\s>]/i).slice(1).forEach(function(seg){
     seg=seg.split(/<\/tr>/i)[0];
-    var c=(seg.match(/<t[dh][\s\S]*?<\/t[dh]>/gi)||[]).map(function(x){return x.replace(/<[^>]*>/g,"").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").trim()});
-    if(c.length<13||!D.test(c[0])||!D.test(c[8]))return;
-    if(!/^(buy|sell)$/i.test(c[3])){bad++;return}
-    rows.push({open:c[0],pos:c[1],sym:c[2],type:c[3],vol:c[4],price:c[5],sl:c[6],tp:c[7],close:c[8],cprice:c[9],comm:c[10],swap:c[11],profit:c[12]});
+    var c=(seg.match(/<t[dh][\s\S]*?<\/t[dh]>/gi)||[]).map(function(x){return x.replace(/<[^>]*>/g,"").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").trim()}).filter(function(x){return x!==""});
+    if(c.length<10||!D.test(c[0]))return;
+    if(c.some(function(x,i){return i>3&&i<8&&/^(in|out|in\/out)$/i.test(x)})){deals++;return}
+    var j=-1,i;for(i=5;i<c.length;i++){if(D.test(c[i])){j=i;break}}
+    if(j<0||c.length<j+5||!/^(buy|sell)$/i.test(c[3])){bad++;return}
+    rows.push({open:c[0],pos:c[1],sym:c[2],type:c[3],vol:c[4],price:c[5],sl:j>6?c[6]:"",tp:j>7?c[7]:"",close:c[j],cprice:c[j+1],comm:c[j+2],swap:c[j+3],profit:c[j+4]});
   });
-  return{rows:rows,bad:bad};
+  return{rows:rows,bad:bad,deals:deals};
 }
 function parsePaste(txt){
   var rows=[],bad=0;
@@ -488,7 +490,8 @@ function openForm(){
     rd.onload=function(){
       var o=opts(),p=reportRows(decodeBuf(rd.result)),recs=[],bad=p.bad;
       p.rows.forEach(function(r){var x=mt5rec(r,o.off,o.risk);if(x)recs.push(x);else bad++});
-      if(!recs.length&&!bad){$("p_err").textContent="No trades found in this file. It must be the HTML report that contains the Positions table.";return}
+      if(!recs.length&&p.deals){$("p_err").textContent="This report shows Deals, not Positions. In MT5, right-click the History tab, choose Positions, then save the report again (Report > HTML).";return}
+      if(!recs.length){$("p_err").textContent="No trades found in this file (rows read: "+p.rows.length+", unreadable: "+bad+"). Save the report from the History tab with the Positions view and a period that contains closed trades, or use the EA sync (JournalSyncDays).";return}
       run(recs,bad);
     };
     rd.readAsArrayBuffer(f);
