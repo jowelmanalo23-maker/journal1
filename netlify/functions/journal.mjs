@@ -25,6 +25,19 @@ export default async (req) => {
   if (req.method === "POST") {
     let e;
     try { e = await req.json(); } catch { return json({ error: "bad json" }, 400); }
+    if (e.event === "edit") {                                // change any field of any trade (EA, imported or typed)
+      if (!e.key || typeof e.fields !== "object") return json({ error: "missing fields" }, 400);
+      const t = await store.get(e.key, { type: "json" });
+      if (!t) return json({ error: "trade not found" }, 404);
+      const allowed = ["symbol", "side", "lots", "entry", "sl", "tp", "exit", "opened_at", "closed_at", "net", "r", "peak_r",
+        "reach_r", "reached", "reached_at", "reason", "trigger", "g1_line", "g1_tf", "g1_kind", "g1_level", "g1_mode", "g1_target",
+        "risk", "status", "currency"];
+      for (const k of allowed) if (k in e.fields) t[k] = e.fields[k];
+      t.edited = true;
+      t.edited_at = Math.floor(Date.now() / 1000);
+      await store.setJSON(e.key, t);
+      return json({ ok: true });
+    }
     if (e.event === "note") {                                // journal notes typed in the web app
       if (!e.key || typeof e.note !== "object") return json({ error: "missing fields" }, 400);
       await notes.setJSON(e.key, { ...e.note, updated_at: Math.floor(Date.now() / 1000) });
